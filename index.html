@@ -357,9 +357,29 @@ async function sbFetch(path, opts={}){
 }
 
 async function upsertDay(agentId, agentNombre, fecha, habits, pipe){
-  return sbFetch('habits_elite?on_conflict=agent_id,fecha', {
+  // Try PATCH first (update if exists)
+  try {
+    const existing = await sbFetch(`habits_elite?agent_id=eq.${agentId}&fecha=eq.${fecha}`);
+    if(existing && existing.length > 0){
+      return sbFetch(`habits_elite?agent_id=eq.${agentId}&fecha=eq.${fecha}`, {
+        method:'PATCH',
+        prefer:'return=representation',
+        body: JSON.stringify({
+          habits,
+          pipe_prog: pipe.prog||0,
+          pipe_act:  pipe.act||0,
+          pipe_new:  pipe.new||0,
+          pipe_lost: pipe.lost||0,
+          pipe_total:pipe.total||0,
+          updated_at: new Date().toISOString()
+        })
+      });
+    }
+  } catch(e){}
+  // INSERT if not exists
+  return sbFetch('habits_elite', {
     method:'POST',
-    prefer:'resolution=merge-duplicates,return=representation',
+    prefer:'return=representation',
     body: JSON.stringify({
       agent_id: agentId,
       agent_nombre: agentNombre,
@@ -370,7 +390,6 @@ async function upsertDay(agentId, agentNombre, fecha, habits, pipe){
       pipe_new:  pipe.new||0,
       pipe_lost: pipe.lost||0,
       pipe_total:pipe.total||0,
-      updated_at: new Date().toISOString()
     })
   });
 }
@@ -588,17 +607,17 @@ function updateScore(){
   fill.style.strokeDashoffset=circ-(circ*pct/100);
   document.getElementById('ringPct').textContent=pct+'%';
   let color,emoji,msg;
-  if(pct===100){color='#00e5a0';emoji='🟢 Día élite completo';msg='¡Perfecto! Todos los hábitos listos.';}
-  else if(pct>=60){color='#ffb800';emoji='🟡 Buen avance';msg=`${total-done} hábito(s) pendiente(s).`;}
-  else if(pct>0){color='#ff4d6a';emoji='🔴 En progreso';msg='Completa tus hábitos para maximizar hoy.';}
-  else{color='#ff4d6a';emoji='🔴 Sin iniciar';msg='Completa tus hábitos para activar tu día élite.';}
+  if(pct===100){color='#00e5a0';emoji='🟢 Día élite completo';msg='¡Todos los hábitos del día listos! 🔥';}
+  else if(pct>=60){color='#ffb800';emoji='🟡 En curso';msg=`Llevas ${done} de ${total} — sigue, aún hay tiempo.`;}
+  else if(pct>0){color='#ff4d6a';emoji='🔴 Iniciando';msg='Puedes ir marcando cada hábito conforme avanza tu día.';}
+  else{color='#55556a';emoji='⚪ Nuevo día';msg='Marca cada hábito conforme lo vayas completando.';}
   fill.style.stroke=color;
   document.getElementById('ringPct').style.color=color;
   document.getElementById('semText').textContent=emoji;
   document.getElementById('semMsg').textContent=msg;
   const sb=document.getElementById('shareBtn');
-  if(pct===100){sb.classList.remove('locked');document.getElementById('shareHint').textContent='Lista para compartir por WhatsApp ✓';}
-  else{sb.classList.add('locked');document.getElementById('shareHint').textContent=`Completa ${total-done} hábito(s) más para compartir`;}
+  sb.classList.remove('locked');
+  document.getElementById('shareHint').textContent=pct===100?'Comparte tu cierre completo por WhatsApp ✓':'Puedes compartir tu avance en cualquier momento';
 }
 
 async function renderStreak(){
@@ -844,7 +863,7 @@ async function renderDirDashboard(selDate){
       </div>`;
       row.onclick=()=>showDetailDir(r,a);
     } else {
-      row.innerHTML=`<div class="ar-top"><div class="ar-name" style="color:var(--text2)">${a.n} ${a.a}</div><div style="font-size:11px;color:var(--text3)">Sin registro</div></div>`;
+      row.innerHTML=`<div class="ar-top"><div class="ar-name" style="color:var(--text2)">${a.n} ${a.a}</div><div style="font-size:11px;background:var(--red-dim);color:var(--red);padding:2px 8px;border-radius:6px">⚠ Sin registro hoy</div></div>`;
     }
     ar.appendChild(row);
   });
@@ -896,7 +915,6 @@ function showDetailDir(r,agent){
 // ══════════════════════════════════════
 function shareDay(){
   const done=Object.values(todayHabits).filter(Boolean).length;
-  if(done<HABITS.length) return;
   const canvas=document.getElementById('shareCanvas');
   canvas.style.display='block';
   const ctx=canvas.getContext('2d');
